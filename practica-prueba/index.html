@@ -1427,6 +1427,8 @@ async function openPlayer(id){
   const data={};
   for(const [k,b] of Object.entries(song.stems))data[k]=new Int16Array(await b.arrayBuffer());
   player={song,data,audio:new Audio(),url:null,vol:Object.fromEntries(STEM_ORDER.map(k=>[k,1])),mute:{},solo:null,target:song.bpm||100,rate:1,practice:new Map(),lastTick:null};
+  // En la página (no solo en memoria) y con título: iOS y Chrome Android lo tratan como reproducción principal y muestran sus controles.
+  player.audio.hidden=true;player.audio.title=song.name;document.body.appendChild(player.audio);
   player.audio.onseeked=updatePositionState;
   player.audio.ontimeupdate=()=>{const r=$('#seek');if(r&&!r.matches(':active')){r.value=player.audio.currentTime;$('#curTime').textContent=fmtClock(player.audio.currentTime)}};
   player.audio.onplay=player.audio.onpause=()=>{practiceTick();const b=$('#playBtn');if(b)b.textContent=player.audio.paused?'▶':'❚❚';syncMini();syncWakeLock();updateMediaSession()};
@@ -1555,7 +1557,7 @@ function practiceTick(){
 }
 function stopPlayer(){
   if(!player)return;
-  player.audio.pause();if(player.url)URL.revokeObjectURL(player.url);
+  player.audio.pause();player.audio.remove();if(player.url)URL.revokeObjectURL(player.url);
   player=null;syncMini();syncWakeLock();updateMediaSession();renderHome();
 }
 function syncMini(){
