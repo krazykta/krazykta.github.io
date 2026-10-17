@@ -1495,8 +1495,10 @@ function renderPlayer(){
 
 // ---------- Pantalla de bloqueo / notificación multimedia (Media Session) ----------
 // iOS (Safari 15+, también la app instalada) y Android muestran título, BPM de práctica y controles.
+// shortcut: diagnóstico temporal de controles en pantalla de bloqueo (?ms=off | ?ms=basic | completo); quitar al saber qué los rompe.
+const MS_MODE=new URLSearchParams(location.search).get('ms')||'full';
 function updateMediaSession(){
-  const ms=navigator.mediaSession,p=player;if(!ms)return;
+  const ms=MS_MODE==='off'?null:navigator.mediaSession,p=player;if(!ms)return;
   try{
     if(!p){ms.metadata=null;ms.playbackState='none';return}
     ms.metadata=new MediaMetadata({
@@ -1505,16 +1507,16 @@ function updateMediaSession(){
       album:'Práctica',
       artwork:[{src:'icons/icon-192.png',sizes:'192x192',type:'image/png'},{src:'icons/icon-512.png',sizes:'512x512',type:'image/png'}]
     });
-    ms.playbackState=p.audio.paused?'paused':'playing';
+    if(MS_MODE==='full')ms.playbackState=p.audio.paused?'paused':'playing';
   }catch{}
   updatePositionState();
 }
 function updatePositionState(){
   const a=player?.audio;
-  if(!a||!navigator.mediaSession?.setPositionState||!Number.isFinite(a.duration))return;
+  if(MS_MODE!=='full'||!a||!navigator.mediaSession?.setPositionState||!Number.isFinite(a.duration))return;
   try{navigator.mediaSession.setPositionState({duration:a.duration,playbackRate:a.playbackRate,position:Math.min(a.currentTime,a.duration)})}catch{}
 }
-if(navigator.mediaSession){
+if(navigator.mediaSession&&MS_MODE!=='off'){
   const a=()=>player?.audio,seek=t=>{const x=a();if(!x)return;x.currentTime=Math.max(0,Math.min(x.duration||0,t));updatePositionState()};
   const handlers={
     play:()=>a()?.play().catch(()=>{}),
@@ -1523,7 +1525,7 @@ if(navigator.mediaSession){
     seekforward:d=>a()&&seek(a().currentTime+(d.seekOffset||10)),
     seekto:d=>seek(d.seekTime)
   };
-  for(const [k,f] of Object.entries(handlers))try{navigator.mediaSession.setActionHandler(k,f)}catch{}
+  for(const [k,f] of Object.entries(handlers))if(MS_MODE==='full'||k==='play'||k==='pause')try{navigator.mediaSession.setActionHandler(k,f)}catch{}
 }
 
 // ---------- Pantalla encendida mientras suena (Screen Wake Lock) ----------
