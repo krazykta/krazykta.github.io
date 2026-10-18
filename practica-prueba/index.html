@@ -1397,23 +1397,28 @@ function mixToWav(){
   const p=player,n=p.song.frames*2,buf=new ArrayBuffer(44+n*2),dv=new DataView(buf);
   const str=(o,t)=>[...t].forEach((c,i)=>dv.setUint8(o+i,c.charCodeAt(0)));
   str(0,'RIFF');dv.setUint32(4,36+n*2,true);str(8,'WAVE');str(12,'fmt ');dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,2,true);
-  dv.setUint32(24,44100,true);dv.setUint32(28,44100*4,true);dv.setUint16(32,4,true);dv.setUint16(34,16,true);str(36,'data');dv.setUint32(40,n*2,true);
+  const sr=Math.round(44100*p.srcRatio);dv.setUint32(24,sr,true);dv.setUint32(28,sr*4,true);dv.setUint16(32,4,true);dv.setUint16(34,16,true);str(36,'data');dv.setUint32(40,n*2,true);
   const out=new Int16Array(buf,44),active=STEM_ORDER.map(k=>[p.data[k],stemGain(k)]).filter(([a,g])=>a&&g>0);
   for(let i=0;i<n;i++){let v=0;for(const [a,g] of active)v+=a[i]*g;out[i]=v>32767?32767:v<-32768?-32768:v}
   return new Blob([buf],{type:'audio/wav'});
 }
+// Tono: el WAV se declara a 44100·r Hz (suena r veces más agudo y rápido) y playbackRate/r con preservesPitch
+// devuelve el tempo sin tocar el tono. Por eso las posiciones se guardan en segundos de canción.
+const songPos=()=>player.audio.currentTime*player.srcRatio;
+const seekSong=t=>{player.audio.currentTime=t/player.srcRatio};
 const stemGain=k=>player.solo?(player.solo===k?player.vol[k]:0):(player.mute[k]?0:player.vol[k]);
 
 function applyRate(){
   const p=player,rate=Math.min(1.5,Math.max(.5,p.song.bpm?p.target/p.song.bpm:p.rate));
-  p.audio.defaultPlaybackRate=rate;p.audio.playbackRate=rate;
+  p.audio.defaultPlaybackRate=p.audio.playbackRate=rate/p.srcRatio;
   p.audio.preservesPitch=true;p.audio.webkitPreservesPitch=true;
 }
 function remix(){
-  const p=player,t=p.audio.currentTime,playing=!p.audio.paused,old=p.url;
+  const p=player,t=songPos(),playing=!p.audio.paused,old=p.url;
+  p.srcRatio=2**(p.semi/12);
   p.url=URL.createObjectURL(mixToWav());
   p.audio.src=p.url;
-  p.audio.onloadedmetadata=()=>{p.audio.currentTime=t;applyRate();if(playing)p.audio.play().catch(()=>{})};
+  p.audio.onloadedmetadata=()=>{seekSong(t);applyRate();if(playing)p.audio.play().catch(()=>{})};
   if(old)URL.revokeObjectURL(old);
 }
 
@@ -1425,25 +1430,28 @@ async function openPlayer(id){
   $('#stemsBody').innerHTML='<div class="card empty">Cargando pistas…</div>';
   const data={};
   for(const [k,b] of Object.entries(song.stems))data[k]=new Int16Array(await b.arrayBuffer());
-  player={song,data,audio:new Audio(),url:null,vol:Object.fromEntries(STEM_ORDER.map(k=>[k,1])),mute:{},solo:null,target:song.bpm||100,rate:1,practice:new Map(),lastTick:null,loop:null};
-  player.audio.ontimeupdate=()=>{checkLoop();const r=$('#seek');if(r&&!r.matches(':active')){r.value=player.audio.currentTime;$('#curTime').textContent=fmtClock(player.audio.currentTime)}};
+  player={song,data,audio:new Audio(),url:null,vol:Object.fromEntries(STEM_ORDER.map(k=>[k,1])),mute:{},solo:null,target:song.bpm||100,rate:1,practice:new Map(),lastTick:null,loop:null,semi:0,srcRatio:1};
+  player.audio.ontimeupdate=()=>{checkLoop();const r=$('#seek');if(r&&!r.matches(':active')){const t=songPos();r.value=t;$('#curTime').textContent=fmtClock(t)}};
   player.audio.onplay=player.audio.onpause=()=>{practiceTick();const b=$('#playBtn');if(b)b.textContent=player.audio.paused?'▶':'❚❚';syncMini();syncPlaybackNotice()};
   remix();renderPlayer();renderHome();
 }
 
 // ---------- Bucle: 1.er toque = inicio, 2.º = cierra y repite, 3.º = quita ----------
 function loopTap(){
-  const p=player,t=p.audio.currentTime;
+  const p=player;if(!p)return;
+  const t=songPos();
   if(!p.loop)p.loop={a:t,b:null};
   else if(p.loop.b==null){
     if(t-p.loop.a<0.5)return toast('Avanza un poco más para cerrar el bucle');
-    p.loop.b=t;p.audio.currentTime=p.loop.a;
+    p.loop.b=t;seekSong(p.loop.a);
   }else p.loop=null;
   const b=$('#loopBtn');if(b){b.textContent=loopLabel();b.classList.toggle('on',!!p.loop);b.setAttribute('aria-pressed',!!p.loop)}
 }
 function checkLoop(){
   const l=player?.loop;
-  if(l?.b!=null&&(player.audio.currentTime>=l.b||player.audio.currentTime<l.a-0.5))player.audio.currentTime=l.a;
+  if(l?.b==null)return;
+  const t=songPos();
+  if(t>=l.b||t<l.a-0.5)seekSong(l.a);
 }
 const loopLabel=()=>{const l=player.loop;return !l?'⟲ Bucle: marcar inicio':l.b==null?`⟲ Cerrar bucle (desde ${fmtClock(l.a)})`:`⟲ Bucle ${fmtClock(l.a)} – ${fmtClock(l.b)} · quitar`};
 // timeupdate llega cada ~250 ms: el intervalo hace el salto más preciso con la app abierta.
@@ -1455,8 +1463,8 @@ function renderPlayer(){
     <div class="backline" id="backSongs">‹ Canciones</div>
     <div class="title" style="font-size:24px;margin:0 0 12px">${esc(s.name)}</div>
     <div class="card">
-      <input id="seek" class="range" type="range" min="0" max="${dur}" step="0.1" value="${p.audio.currentTime||0}" aria-label="Posición">
-      <div class="time-row"><span id="curTime">${fmtClock(p.audio.currentTime)}</span><span>${fmtClock(dur)}</span></div>
+      <input id="seek" class="range" type="range" min="0" max="${dur}" step="0.1" value="${songPos()||0}" aria-label="Posición">
+      <div class="time-row"><span id="curTime">${fmtClock(songPos())}</span><span>${fmtClock(dur)}</span></div>
       <div class="transport">
         <button class="icon-btn" id="back5" aria-label="Atrás 5 segundos">−5s</button>
         <button class="play-btn" id="playBtn" aria-label="Reproducir o pausar">${p.audio.paused?'▶':'❚❚'}</button>
@@ -1477,6 +1485,11 @@ function renderPlayer(){
       <div class="mini-btns"><button data-pct="0.75" type="button">75%</button><button data-pct="0.9" type="button">90%</button><button data-pct="1" type="button">100%</button></div>`
       :`<div class="empty" style="font-size:12px;margin-top:10px">No se pudo detectar el BPM. Escríbelo arriba para ajustar el tempo.</div>`}
     </div>
+    <div class="section-title">Tono</div>
+    <div class="card">
+      <div class="bpm-row"><button id="semiDown" type="button" aria-label="Bajar un semitono">−</button><div><div class="bpm-big">${p.semi>0?'+':''}${p.semi}</div><div class="muted" style="text-align:center;font-size:12px">${p.semi?'semitonos':'tono original'}</div></div><button id="semiUp" type="button" aria-label="Subir un semitono">+</button></div>
+      <div class="empty" style="font-size:12px;margin-top:10px">−1 = afinación en Mi♭. El tempo no cambia.</div>
+    </div>
     <div class="section-title">Pistas</div>
     <div class="card">${STEM_ORDER.filter(k=>p.data[k]).map(k=>`<div class="stem-row"><div class="c" style="--cat:${STEM_INFO[k][1]}"></div><span>${STEM_INFO[k][0]}</span><input class="range" type="range" min="0" max="1" step="0.05" value="${p.vol[k]}" data-vol="${k}" aria-label="Volumen ${STEM_INFO[k][0]}"><button data-solo="${k}" class="${p.solo===k?'on':''}" aria-pressed="${p.solo===k}">S</button><button data-mute="${k}" class="mute ${p.mute[k]?'on':''}" aria-pressed="${!!p.mute[k]}">M</button></div>`).join('')}</div>
     <div class="mini-btns"><button data-mix="all" type="button">Todo</button><button data-mix="guitar" type="button">Sin guitarra</button><button data-mix="bass" type="button">Sin bajo</button></div>
@@ -1485,11 +1498,11 @@ function renderPlayer(){
   $('#backSongs').onclick=()=>renderSongList();
   $('#logPractice').onclick=logPracticeFromPlayer;
   $('#playBtn').onclick=()=>{askNoticePermission();a.paused?a.play().catch(()=>toast('No se pudo reproducir')):a.pause()};
-  $('#back5').onclick=()=>a.currentTime=Math.max(0,a.currentTime-5);
-  $('#fwd5').onclick=()=>a.currentTime=Math.min(dur,a.currentTime+5);
+  $('#back5').onclick=()=>seekSong(Math.max(0,songPos()-5));
+  $('#fwd5').onclick=()=>seekSong(Math.min(dur,songPos()+5));
   $('#loopBtn').onclick=loopTap;
   $('#seek').oninput=e=>{$('#curTime').textContent=fmtClock(+e.target.value)};
-  $('#seek').onchange=e=>{a.currentTime=+e.target.value};
+  $('#seek').onchange=e=>seekSong(+e.target.value);
   const saveBpm=async bpm=>{s.bpm=bpm>=30&&bpm<=300?Math.round(bpm):null;p.target=s.bpm||100;await putSong(s);applyRate();renderPlayer()};
   $('#origBpm').onchange=e=>saveBpm(+e.target.value);
   $('#halfBpm').onclick=()=>s.bpm&&saveBpm(s.bpm/2);
@@ -1501,6 +1514,9 @@ function renderPlayer(){
     $('#bpmRange').onchange=e=>setTarget(+e.target.value);
     $$('[data-pct]').forEach(b=>b.onclick=()=>setTarget(Math.round(s.bpm*+b.dataset.pct)));
   }
+  const setSemi=v=>{p.semi=Math.max(-6,Math.min(6,v));remix();renderPlayer()};
+  $('#semiDown').onclick=()=>setSemi(p.semi-1);
+  $('#semiUp').onclick=()=>setSemi(p.semi+1);
   $$('[data-vol]').forEach(r=>r.onchange=()=>{p.vol[r.dataset.vol]=+r.value;remix()});
   $$('[data-solo]').forEach(b=>b.onclick=()=>{p.solo=p.solo===b.dataset.solo?null:b.dataset.solo;remix();renderPlayer()});
   $$('[data-mute]').forEach(b=>b.onclick=()=>{p.mute[b.dataset.mute]=!p.mute[b.dataset.mute];remix();renderPlayer()});
