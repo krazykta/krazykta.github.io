@@ -23,11 +23,14 @@ self.addEventListener("activate", event => {
   self.clients.claim();
 });
 
-// Tocar el aviso "Reproducción en curso" vuelve a la app.
+// Mini reproductor de la pantalla de bloqueo: los botones se reenvían a la página; tocar el aviso abre la app.
 self.addEventListener("notificationclick", event => {
-  event.notification.close();
-  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true })
-    .then(list => list.length ? list[0].focus() : clients.openWindow("./")));
+  const action = event.action;
+  if (!action) event.notification.close();
+  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+    if (action) return list.forEach(c => c.postMessage(action));
+    return list.length ? list[0].focus() : clients.openWindow("./");
+  }));
 });
 
 self.addEventListener("fetch", event => {
