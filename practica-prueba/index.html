@@ -1487,40 +1487,20 @@ function renderPlayer(){
   $$('[data-mix]').forEach(b=>b.onclick=()=>{p.solo=null;p.mute={};if(b.dataset.mix!=='all')p.mute[b.dataset.mix]=true;remix();renderPlayer()});
 }
 
-// ---------- Mini reproductor en la pantalla de bloqueo (notificación con botones) ----------
-// Se crea al ocultarse la app (al bloquear), no al pulsar play: algunos móviles (Xiaomi) no enseñan en el
+// ---------- Aviso "Práctica en curso" en la pantalla de bloqueo ----------
+// Se publica al ocultarse la app (al bloquear), no al pulsar play: algunos móviles (Xiaomi) no enseñan en el
 // bloqueo las notificaciones creadas con la pantalla encendida porque las dan por vistas.
-// Una vez creado se mantiene aunque se pause desde él, para poder reanudar sin desbloquear.
 const PLAY_NOTICE_TAG='practica-reproduccion';
-let noticeKey='';
 const askNoticePermission=()=>{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission().catch(()=>{})};
 async function syncPlaybackNotice(){
   const reg=await navigator.serviceWorker?.getRegistration().catch(()=>null);
   if(!reg?.showNotification)return;
-  const p=player,playing=!!p&&!p.audio.paused;
-  const show=!!p&&document.visibilityState==='hidden'&&Notification.permission==='granted'&&(playing||noticeKey!=='');
-  if(!show){
-    if(noticeKey==='')return;
-    noticeKey='';
-    (await reg.getNotifications({tag:PLAY_NOTICE_TAG}).catch(()=>[])).forEach(n=>n.close());
-    return;
-  }
-  const mins=Math.floor(practiceSeconds()/60),key=`${playing}|${mins}|${Math.round(p.target)}`;
-  if(key===noticeKey)return;
-  noticeKey=key;
-  reg.showNotification(playing?'▶ Reproduciendo':'⏸ En pausa',{
-    tag:PLAY_NOTICE_TAG,silent:true,renotify:false,icon:'icons/icon-192.png',badge:'icons/icon-192.png',
-    body:`${p.song.name}${p.song.bpm?` · ${Math.round(p.target)} BPM`:''} · ${fmt(mins)} de práctica`,
-    actions:[{action:'toggle',title:playing?'⏸ Pausar':'▶ Reanudar'},{action:'back',title:'⏪ 10 s'}]
-  }).catch(()=>{});
+  (await reg.getNotifications({tag:PLAY_NOTICE_TAG}).catch(()=>[])).forEach(n=>n.close());
+  const p=player;
+  if(!p||p.audio.paused||document.visibilityState!=='hidden'||Notification.permission!=='granted')return;
+  reg.showNotification('Práctica en curso',{tag:PLAY_NOTICE_TAG,body:`${p.song.name}${p.song.bpm?` · ${Math.round(p.target)} BPM`:''}`,icon:'icons/icon-192.png',badge:'icons/icon-192.png',silent:true}).catch(()=>{});
 }
 document.addEventListener('visibilitychange',syncPlaybackNotice);
-// Botones del aviso: el Service Worker reenvía la acción a la página.
-if(navigator.serviceWorker)navigator.serviceWorker.onmessage=e=>{
-  const a=player?.audio;if(!a)return;
-  if(e.data==='toggle')a.paused?a.play().catch(()=>{}):a.pause();
-  if(e.data==='back')a.currentTime=Math.max(0,a.currentTime-10);
-};
 
 // ---------- Modo práctica con canción ----------
 let sessionFromPlayer=false;
@@ -1576,7 +1556,7 @@ function logPracticeFromPlayer(){
   $('#notes').value=`Con el separador de pistas${off.length?` (sin ${off.join(', ')})`:''}.`;
   updateTotal();
 }
-setInterval(()=>{practiceTick();syncMini();if(document.visibilityState==='hidden')syncPlaybackNotice()},1000);
+setInterval(()=>{practiceTick();syncMini()},1000);
 
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1600)}
 function moveNavIndicator(target){const nav=document.querySelector('.nav'),ind=document.querySelector('.nav-indicator');if(!nav||!ind||!target)return;const nr=nav.getBoundingClientRect(),tr=target.getBoundingClientRect();ind.style.width=`${tr.width}px`;ind.style.transform=`translateX(${tr.left-nr.left}px)`}

@@ -23,14 +23,11 @@ self.addEventListener("activate", event => {
   self.clients.claim();
 });
 
-// Mini reproductor de la pantalla de bloqueo: los botones se reenvían a la página; tocar el aviso abre la app.
+// Tocar el aviso "Práctica en curso" vuelve a la app.
 self.addEventListener("notificationclick", event => {
-  const action = event.action;
-  if (!action) event.notification.close();
-  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
-    if (action) return list.forEach(c => c.postMessage(action));
-    return list.length ? list[0].focus() : clients.openWindow("./");
-  }));
+  event.notification.close();
+  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then(list => list.length ? list[0].focus() : clients.openWindow("./")));
 });
 
 self.addEventListener("fetch", event => {
