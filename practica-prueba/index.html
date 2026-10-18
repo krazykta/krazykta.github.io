@@ -548,7 +548,7 @@ function lastBackupText(){
   return `Última: ${new Date(t).toLocaleDateString('es-ES')}${days>=7?` · hace ${days} días`:''}`;
 }
 async function exportBackup(){
-  const data={app:'practica',format:1,exportedAt:new Date().toISOString(),sessions:sessionStore,exercises:exerciseStore,goals:goals()};
+  const data={app:'practica',format:1,exportedAt:new Date().toISOString(),sessions:sessionStore,exercises:exerciseStore,goals:goals(),customScales};
   const name=`practica-backup-${isoDay(new Date())}.json`;
   const file=new File([JSON.stringify(data,null,1)],name,{type:'application/json'});
   try{
@@ -572,6 +572,7 @@ async function importBackup(file){
   try{d=parseBackup(await file.text())}catch{return toast('Archivo de copia no válido')}
   if(!confirm(`¿Importar ${d.sessions.length} prácticas y ${d.exercises.length} ejercicios? Se sustituirán los datos actuales de este dispositivo.`))return;
   saveExercises(d.exercises);saveSessions(d.sessions);if(d.goals)saveGoals(d.goals);
+  if(Array.isArray(d.customScales))saveCustomScales(d.customScales.filter(validCustomScale));
   renderAll();toast('Copia importada');
 }
 
@@ -1184,32 +1185,57 @@ function deleteSavedExercise(id){
 
 // THEORY-START
 const LETTERS=['C','D','E','F','G','A','B'],LETTER_PC=[0,2,4,5,7,9,11];
-const SCALE_STEPS={major:[0,2,4,5,7,9,11],minor:[0,2,3,5,7,8,10]};
 const CIRCLE_MAJOR=['C','G','D','A','E','B','F#','Db','Ab','Eb','Bb','F'];
 const CIRCLE_MINOR=['A','E','B','F#','C#','G#','D#','Bb','F','C','G','D'];
-const DEGREE_LABELS={major:['1','2','3','4','5','6','7'],minor:['1','2','♭3','4','5','♭6','♭7']};
 const TUNINGS={Guitarra:['E','A','D','G','B','E'],Bajo:['E','A','D','G']};
+// Cada escala se define por sus grados ('b3', '#4'…): de ellos salen los semitonos y la ortografía
+// (cada grado usa la letra de su número contando desde la tónica).
+const SCALE_GROUPS=[
+  ['Mayor y sus modos',[['major','Mayor (jónica)','1 2 3 4 5 6 7'],['dorian','Dórica','1 2 b3 4 5 6 b7'],['phrygian','Frigia','1 b2 b3 4 5 b6 b7'],['lydian','Lidia','1 2 3 #4 5 6 7'],['mixolydian','Mixolidia','1 2 3 4 5 6 b7'],['minor','Menor natural (eólica)','1 2 b3 4 5 b6 b7'],['locrian','Locria','1 b2 b3 4 b5 b6 b7']]],
+  ['Pentatónicas y blues',[['pentaMajor','Pentatónica mayor','1 2 3 5 6'],['pentaMinor','Pentatónica menor','1 b3 4 5 b7'],['blues','Blues','1 b3 4 b5 5 b7'],['bluesMajor','Blues mayor','1 2 b3 3 5 6'],['pentaSus','Pentatónica suspendida','1 2 4 5 b7']]],
+  ['Menor armónica y sus modos',[['harmonicMinor','Menor armónica','1 2 b3 4 5 b6 7'],['locrianNat6','Locria ♮6','1 b2 b3 4 b5 6 b7'],['ionianSharp5','Jónica ♯5','1 2 3 4 #5 6 7'],['dorianSharp4','Dórica ♯4','1 2 b3 #4 5 6 b7'],['phrygianDominant','Frigia dominante','1 b2 3 4 5 b6 b7'],['lydianSharp2','Lidia ♯2','1 #2 3 #4 5 6 7'],['ultralocrian','Ultralocria','1 b2 b3 b4 b5 b6 bb7']]],
+  ['Menor melódica y sus modos',[['melodicMinor','Menor melódica','1 2 b3 4 5 6 7'],['dorianFlat2','Dórica ♭2','1 b2 b3 4 5 6 b7'],['lydianAugmented','Lidia aumentada','1 2 3 #4 #5 6 7'],['lydianDominant','Lidia dominante','1 2 3 #4 5 6 b7'],['mixolydianFlat6','Mixolidia ♭6','1 2 3 4 5 b6 b7'],['locrianNat2','Locria ♮2','1 2 b3 4 b5 b6 b7'],['altered','Alterada (superlocria)','1 b2 b3 b4 b5 b6 b7']]],
+  ['Bebop',[['bebopDominant','Bebop dominante','1 2 3 4 5 6 b7 7'],['bebopMajor','Bebop mayor','1 2 3 4 5 #5 6 7'],['bebopDorian','Bebop dórica','1 2 b3 3 4 5 6 b7']]],
+  ['Simétricas',[['wholeTone','Tonos enteros','1 2 3 #4 #5 b7'],['dimWholeHalf','Disminuida (tono-semitono)','1 2 b3 4 b5 b6 6 7'],['dimHalfWhole','Disminuida (semitono-tono)','1 b2 #2 3 #4 5 6 b7'],['augmented','Aumentada','1 #2 3 5 #5 7'],['chromatic','Cromática','1 b2 2 b3 3 4 #4 5 b6 6 b7 7']]],
+  ['Otras',[['harmonicMajor','Mayor armónica','1 2 3 4 5 b6 7'],['doubleHarmonic','Doble armónica (árabe)','1 b2 3 4 5 b6 7'],['hungarianMinor','Húngara menor','1 2 b3 #4 5 b6 7'],['hungarianMajor','Húngara mayor','1 #2 3 #4 5 6 b7'],['neapolitanMinor','Napolitana menor','1 b2 b3 4 5 b6 7'],['neapolitanMajor','Napolitana mayor','1 b2 b3 4 5 6 7'],['spanish8','Española de 8 notas','1 b2 #2 3 4 b5 b6 b7'],['persian','Persa','1 b2 3 4 b5 b6 7'],['enigmatic','Enigmática','1 b2 3 #4 #5 #6 7'],['prometheus','Prometeo','1 2 3 #4 6 b7'],['hirajoshi','Hirajoshi','1 2 b3 5 b6'],['inSen','In sen','1 b2 4 5 b7'],['iwato','Iwato','1 b2 4 b5 b7'],['kumoi','Kumoi','1 2 b3 5 6']]]
+];
+const SCALES=SCALE_GROUPS.flatMap(([group,list])=>list.map(([id,name,deg])=>({id,name,group,labels:deg.split(' ')})));
+const CUSTOM_DEGREES=['1','b2','2','b3','3','4','b5','5','b6','6','b7','7'];
+let customScales=[];
+const scaleDef=id=>SCALES.find(s=>s.id===id)||customScales.find(s=>s.id===id)||SCALES[0];
+const degreeStep=l=>{const m=/^(b*|#*)([1-7])$/.exec(l);return m?LETTER_PC[m[2]-1]+(m[1][0]==='#'?1:-1)*m[1].length:NaN};
 const notePc=n=>(LETTER_PC[LETTERS.indexOf(n[0])]+[...n.slice(1)].reduce((x,c)=>x+(c==='#'?1:-1),0)+12)%12;
-function spellScale(tonic,mode){
+function spellLabels(tonic,labels){
   const l0=LETTERS.indexOf(tonic[0]),pc0=notePc(tonic);
-  return SCALE_STEPS[mode].map((st,i)=>{
-    const l=(l0+i)%7,acc=((pc0+st-LETTER_PC[l])%12+18)%12-6;
+  return labels.map(lab=>{
+    const l=(l0+ +lab.slice(-1)-1)%7,acc=((pc0+degreeStep(lab)-LETTER_PC[l])%12+18)%12-6;
     return LETTERS[l]+(acc>0?'#'.repeat(acc):'b'.repeat(-acc));
   });
 }
+const spellScale=(tonic,mode)=>spellLabels(tonic,scaleDef(mode).labels);
 // THEORY-END
 const SOLFEGE={C:'Do',D:'Re',E:'Mi',F:'Fa',G:'Sol',A:'La',B:'Si'};
-const DEGREE_COLORS=['#00F0FF','#8A9696','#FFD166','#8A9696','#B69CFF','#8A9696','#FF6B7A'];
+const degreeColor=l=>({'1':'#00F0FF','3':'#FFD166','b3':'#FFD166','5':'#B69CFF','7':'#FF6B7A','b7':'#FF6B7A','bb7':'#FF6B7A'})[l]||'#8A9696';
 const pretty=n=>n.replace(/#/g,'♯').replace(/b/g,'♭');
-const spanishName=(n,mode)=>`${SOLFEGE[n[0]]}${pretty(n.slice(1))} ${mode==='major'?'mayor':'menor'}`;
+const solfege=n=>`${SOLFEGE[n[0]]}${pretty(n.slice(1))}`;
+const spanishName=(n,mode)=>`${solfege(n)} ${mode==='major'?'mayor':'menor'}`;
 const SCALE_PREFS_KEY='practica_scales_prefs';
 let scaleState={tonic:'C',mode:'major',degrees:[true,true,true,true,true,true,true],labels:'degrees',instrument:'Guitarra'};
 try{scaleState={...scaleState,...JSON.parse(localStorage.getItem(SCALE_PREFS_KEY)||'{}')}}catch{}
+const CUSTOM_SCALES_KEY=PREVIEW?'practica_preview_custom_scales':'practica_custom_scales_v1';
+const validCustomScale=s=>!!s&&typeof s.id==='string'&&typeof s.name==='string'&&!!s.name.trim()&&Array.isArray(s.labels)&&s.labels[0]==='1'&&s.labels.length>=3&&s.labels.every(l=>CUSTOM_DEGREES.includes(l))&&new Set(s.labels).size===s.labels.length;
+try{customScales=JSON.parse(localStorage.getItem(CUSTOM_SCALES_KEY)||'[]').filter(validCustomScale)}catch{}
+function saveCustomScales(list){
+  customScales=list;
+  try{localStorage.setItem(CUSTOM_SCALES_KEY,JSON.stringify(list))}catch{toast('No se pudo guardar la escala')}
+}
+let scaleDraft=null; // escala propia en edición: {id|null, name, sel:[índices de CUSTOM_DEGREES]}
 
 function circleSvg(){
   const cx=160,cy=160,pos=(i,r)=>{const a=(i*30-90)*Math.PI/180;return [cx+r*Math.cos(a),cy+r*Math.sin(a)]};
+  const ring=scaleState.ring||(scaleState.mode==='minor'?'minor':'major');
   const key=(mode,n,i,r,size)=>{
-    const [x,y]=pos(i,r),sel=scaleState.mode===mode&&scaleState.tonic===n;
+    const [x,y]=pos(i,r),sel=ring===mode&&scaleState.tonic===n;
     const label=mode==='major'?pretty(n):pretty(n)+'m';
     return `<g data-key="${mode}:${n}" role="button" aria-label="${spanishName(n,mode)}">
       <circle cx="${x}" cy="${y}" r="${size}" fill="${sel?'rgba(0,240,255,.24)':'transparent'}" stroke="${sel?'rgba(0,240,255,.6)':'transparent'}"/>
@@ -1228,7 +1254,7 @@ function circleSvg(){
 
 function fretboardSvg(){
   const tuning=TUNINGS[scaleState.instrument]||TUNINGS.Guitarra,frets=15,n=tuning.length;
-  const scale=spellScale(scaleState.tonic,scaleState.mode),pcs=scale.map(notePc);
+  const labels=scaleDef(scaleState.mode).labels,scale=spellScale(scaleState.tonic,scaleState.mode),pcs=scale.map(notePc);
   const W=320,left=36,right=20,top=44,fretH=38,sx=(W-left-right)/(n-1),H=top+frets*fretH+14;
   const xOf=i=>left+i*sx,yOf=f=>f===0?top-22:top+(f-.5)*fretH,mid=(left+W-right)/2;
   let out=`<svg class="fretboard" viewBox="0 0 ${W} ${H}" role="img" aria-label="Mástil de ${scaleState.instrument.toLowerCase()}">`;
@@ -1243,8 +1269,8 @@ function fretboardSvg(){
     for(let f=0;f<=frets;f++){
       const d=pcs.indexOf((notePc(t)+f)%12);
       if(d<0||!scaleState.degrees[d])continue;
-      const label=scaleState.labels==='degrees'?DEGREE_LABELS[scaleState.mode][d]:pretty(scale[d]);
-      out+=`<circle cx="${xOf(i)}" cy="${yOf(f)}" r="13" fill="${DEGREE_COLORS[d]}" ${f===0?'stroke="#f7f9f9" stroke-width="1.5"':''}/>
+      const label=pretty(scaleState.labels==='degrees'?labels[d]:scale[d]);
+      out+=`<circle cx="${xOf(i)}" cy="${yOf(f)}" r="13" fill="${degreeColor(labels[d])}" ${f===0?'stroke="#f7f9f9" stroke-width="1.5"':''}/>
         <text x="${xOf(i)}" y="${yOf(f)}" text-anchor="middle" dominant-baseline="central" font-size="${label.length>2?9:11}" font-weight="800" fill="#00131f">${label}</text>`;
     }
   });
@@ -1255,20 +1281,51 @@ function openScales(){
   const m=$('#toolModal');
   m.innerHTML=`<div class="topbar"><button id="closeScales">Cerrar</button><h2>Escalas</h2><button aria-hidden="true" tabindex="-1"></button></div><div class="form" id="scalesBody"></div>`;
   m.classList.add('open');m.scrollTop=0;
-  $('#closeScales').onclick=()=>m.classList.remove('open');
+  $('#closeScales').onclick=()=>{scaleDraft=null;m.classList.remove('open')};
   renderScales();
 }
+// Grados visibles según el último atajo (Todos/Tónica/Tríada/Cuatriada); si se eligieron a mano, todos.
+const presetDegrees=(labels,preset)=>labels.map(l=>(preset||'1234567').includes(l.slice(-1)));
+function setScaleMode(id){
+  const st=scaleState;st.mode=id;
+  if(id==='major'||id==='minor')st.ring=id;
+  st.degrees=presetDegrees(scaleDef(id).labels,st.preset);
+}
+function scaleEditorHtml(){
+  const d=scaleDraft,labels=d.sel.map(i=>CUSTOM_DEGREES[i]);
+  return `<div class="card" style="margin-top:10px">
+    <div class="field"><label>Nombre de la escala</label><input id="csName" maxlength="40" value="${esc(d.name)}" placeholder="Mi escala"></div>
+    <div class="muted" style="font-size:12px;margin:0 4px 8px">Toca los grados que lleva (el 1 siempre está)</div>
+    <div class="degree-chips" style="grid-template-columns:repeat(6,1fr)">${CUSTOM_DEGREES.map((l,i)=>`<button type="button" data-cs="${i}" class="${d.sel.includes(i)?'on':''}" style="--deg:${degreeColor(l)}" aria-pressed="${d.sel.includes(i)}" ${i?'':'disabled'}>${pretty(l)}</button>`).join('')}</div>
+    <div class="key-notes" style="margin:12px 0">${solfege(scaleState.tonic)}: ${spellLabels(scaleState.tonic,labels).map(pretty).join(' · ')}</div>
+    <div class="block-actions"><button type="button" class="secondary" id="csCancel">Cancelar</button><button type="button" class="primary" id="csSave">Guardar</button></div>
+  </div>`;
+}
+function saveScaleDraft(){
+  const d=scaleDraft,name=d.name.trim();
+  if(!name)return toast('Ponle un nombre a la escala');
+  if(d.sel.length<3)return toast('Elige al menos 3 notas');
+  const sc={id:d.id||'custom-'+uuid(),name,labels:d.sel.map(i=>CUSTOM_DEGREES[i])};
+  saveCustomScales(d.id?customScales.map(x=>x.id===d.id?sc:x):[...customScales,sc]);
+  scaleDraft=null;setScaleMode(sc.id);renderScales();toast('Escala guardada');
+}
 function renderScales(){
+  const st=scaleState,def=scaleDef(st.mode),labels=def.labels,scale=spellScale(st.tonic,st.mode);
+  st.mode=def.id;
+  if(st.degrees.length!==labels.length)st.degrees=presetDegrees(labels,st.preset);
   try{localStorage.setItem(SCALE_PREFS_KEY,JSON.stringify(scaleState))}catch{}
-  const st=scaleState,scale=spellScale(st.tonic,st.mode),labels=DEGREE_LABELS[st.mode];
-  const seg=(attr,items,cur)=>`<div class="seg two">${items.map(([k,l])=>`<button type="button" ${attr}="${k}" class="${cur===k?'active':''}">${l}</button>`).join('')}</div>`;
+  const custom=!def.group,seg=(attr,items,cur)=>`<div class="seg two">${items.map(([k,l])=>`<button type="button" ${attr}="${k}" class="${cur===k?'active':''}">${l}</button>`).join('')}</div>`;
+  const opts=list=>list.map(s=>`<option value="${esc(s.id)}" ${s.id===def.id?'selected':''}>${esc(s.name)}</option>`).join('');
   $('#scalesBody').innerHTML=`
     ${seg('data-scale-instrument',[['Guitarra','Guitarra'],['Bajo','Bajo']],st.instrument)}
     ${circleSvg()}
-    <div class="key-title">${spanishName(st.tonic,st.mode)} · ${pretty(st.tonic)}${st.mode==='minor'?'m':''}</div>
+    <div class="key-title">${def.id==='major'||def.id==='minor'?`${spanishName(st.tonic,def.id)} · ${pretty(st.tonic)}${def.id==='minor'?'m':''}`:`${solfege(st.tonic)} · ${esc(def.name)}`}</div>
     <div class="key-notes">${scale.map(pretty).join(' · ')}</div>
+    <div class="section-title">Escala</div>
+    <div class="field" style="margin-bottom:8px"><select id="scaleType" aria-label="Tipo de escala">${SCALE_GROUPS.map(([g])=>`<optgroup label="${g}">${opts(SCALES.filter(s=>s.group===g))}</optgroup>`).join('')}${customScales.length?`<optgroup label="Mis escalas">${opts(customScales)}</optgroup>`:''}</select></div>
+    ${scaleDraft?scaleEditorHtml():`<div class="block-actions" style="${custom?'':'grid-template-columns:1fr'}"><button type="button" class="secondary" id="newScale">+ Crear escala</button>${custom?`<button type="button" class="secondary" id="editScale">Editar</button><button type="button" class="danger" id="delScale" style="grid-column:1/-1">Borrar «${esc(def.name)}»</button>`:''}</div>`}
     <div class="section-title">Grados visibles</div>
-    <div class="degree-chips">${labels.map((l,i)=>`<button type="button" data-degree="${i}" class="${st.degrees[i]?'on':''}" style="--deg:${DEGREE_COLORS[i]}" aria-pressed="${st.degrees[i]}">${l}</button>`).join('')}</div>
+    <div class="degree-chips">${labels.map((l,i)=>`<button type="button" data-degree="${i}" class="${st.degrees[i]?'on':''}" style="--deg:${degreeColor(l)}" aria-pressed="${st.degrees[i]}">${pretty(l)}</button>`).join('')}</div>
     <div class="preset-row">
       <button type="button" data-preset="1234567">Todos</button>
       <button type="button" data-preset="1">Tónica</button>
@@ -1278,11 +1335,24 @@ function renderScales(){
     <div class="section-title">Mástil</div>
     ${seg('data-scale-labels',[['degrees','Grados'],['notes','Notas']],st.labels)}
     <div class="card" style="padding:10px 4px">${fretboardSvg()}</div>`;
-  $$('[data-key]').forEach(g=>g.onclick=()=>{const [mode,n]=g.dataset.key.split(':');st.mode=mode;st.tonic=n;renderScales()});
-  $$('[data-degree]').forEach(b=>b.onclick=()=>{st.degrees[+b.dataset.degree]=!st.degrees[+b.dataset.degree];renderScales()});
-  $$('[data-preset]').forEach(b=>b.onclick=()=>{st.degrees=st.degrees.map((_,i)=>b.dataset.preset.includes(String(i+1)));renderScales()});
+  $$('[data-key]').forEach(g=>g.onclick=()=>{const [ring,n]=g.dataset.key.split(':');st.ring=ring;st.tonic=n;if(st.mode==='major'||st.mode==='minor')st.mode=ring;renderScales()});
+  $('#scaleType').onchange=e=>{setScaleMode(e.target.value);renderScales()};
+  $$('[data-degree]').forEach(b=>b.onclick=()=>{st.preset=null;st.degrees[+b.dataset.degree]=!st.degrees[+b.dataset.degree];renderScales()});
+  $$('[data-preset]').forEach(b=>b.onclick=()=>{st.preset=b.dataset.preset;st.degrees=presetDegrees(labels,st.preset);renderScales()});
   $$('[data-scale-instrument]').forEach(b=>b.onclick=()=>{st.instrument=b.dataset.scaleInstrument;renderScales()});
   $$('[data-scale-labels]').forEach(b=>b.onclick=()=>{st.labels=b.dataset.scaleLabels;renderScales()});
+  if(scaleDraft){
+    $('#csName').oninput=e=>scaleDraft.name=e.target.value;
+    $$('[data-cs]').forEach(b=>b.onclick=()=>{const i=+b.dataset.cs,sel=scaleDraft.sel;scaleDraft.sel=sel.includes(i)?sel.filter(x=>x!==i):[...sel,i].sort((x,y)=>x-y);renderScales()});
+    $('#csCancel').onclick=()=>{scaleDraft=null;renderScales()};
+    $('#csSave').onclick=saveScaleDraft;
+    return;
+  }
+  $('#newScale').onclick=()=>{scaleDraft={id:null,name:'',sel:[0,2,4,5,7,9,11]};renderScales();$('#csName').focus()};
+  if(custom){
+    $('#editScale').onclick=()=>{scaleDraft={id:def.id,name:def.name,sel:def.labels.map(l=>CUSTOM_DEGREES.indexOf(l))};renderScales()};
+    $('#delScale').onclick=()=>{if(!confirm(`¿Borrar la escala «${def.name}»?`))return;saveCustomScales(customScales.filter(x=>x.id!==def.id));setScaleMode('major');renderScales()};
+  }
 }
 
 // ---------- Separador de pistas ----------
