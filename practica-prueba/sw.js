@@ -23,6 +23,13 @@ self.addEventListener("activate", event => {
   self.clients.claim();
 });
 
+// Tocar el aviso "Reproducción en curso" vuelve a la app.
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then(list => list.length ? list[0].focus() : clients.openWindow("./")));
+});
+
 self.addEventListener("fetch", event => {
   if (event.request.method !== "GET") return;
 

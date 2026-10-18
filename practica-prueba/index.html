@@ -1427,7 +1427,7 @@ async function openPlayer(id){
   for(const [k,b] of Object.entries(song.stems))data[k]=new Int16Array(await b.arrayBuffer());
   player={song,data,audio:new Audio(),url:null,vol:Object.fromEntries(STEM_ORDER.map(k=>[k,1])),mute:{},solo:null,target:song.bpm||100,rate:1,practice:new Map(),lastTick:null};
   player.audio.ontimeupdate=()=>{const r=$('#seek');if(r&&!r.matches(':active')){r.value=player.audio.currentTime;$('#curTime').textContent=fmtClock(player.audio.currentTime)}};
-  player.audio.onplay=player.audio.onpause=()=>{practiceTick();const b=$('#playBtn');if(b)b.textContent=player.audio.paused?'▶':'❚❚';syncMini()};
+  player.audio.onplay=player.audio.onpause=()=>{practiceTick();const b=$('#playBtn');if(b)b.textContent=player.audio.paused?'▶':'❚❚';syncMini();syncPlaybackNotice()};
   remix();renderPlayer();renderHome();
 }
 
@@ -1465,7 +1465,7 @@ function renderPlayer(){
   const a=p.audio;
   $('#backSongs').onclick=()=>renderSongList();
   $('#logPractice').onclick=logPracticeFromPlayer;
-  $('#playBtn').onclick=()=>a.paused?a.play().catch(()=>toast('No se pudo reproducir')):a.pause();
+  $('#playBtn').onclick=()=>{askNoticePermission();a.paused?a.play().catch(()=>toast('No se pudo reproducir')):a.pause()};
   $('#back5').onclick=()=>a.currentTime=Math.max(0,a.currentTime-5);
   $('#fwd5').onclick=()=>a.currentTime=Math.min(dur,a.currentTime+5);
   $('#seek').oninput=e=>{$('#curTime').textContent=fmtClock(+e.target.value)};
@@ -1487,6 +1487,21 @@ function renderPlayer(){
   $$('[data-mix]').forEach(b=>b.onclick=()=>{p.solo=null;p.mute={};if(b.dataset.mix!=='all')p.mute[b.dataset.mix]=true;remix();renderPlayer()});
 }
 
+// ---------- Aviso "Reproducción en curso" en la pantalla de bloqueo ----------
+// Se publica al ocultarse la app (al bloquear), no al pulsar play: algunos móviles (Xiaomi) no enseñan en el
+// bloqueo las notificaciones creadas con la pantalla encendida porque las dan por vistas.
+const PLAY_NOTICE_TAG='practica-reproduccion';
+const askNoticePermission=()=>{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission().catch(()=>{})};
+async function syncPlaybackNotice(){
+  const reg=await navigator.serviceWorker?.getRegistration().catch(()=>null);
+  if(!reg?.showNotification)return;
+  (await reg.getNotifications({tag:PLAY_NOTICE_TAG}).catch(()=>[])).forEach(n=>n.close());
+  const p=player;
+  if(!p||p.audio.paused||document.visibilityState!=='hidden'||Notification.permission!=='granted')return;
+  reg.showNotification('Reproducción en curso',{tag:PLAY_NOTICE_TAG,body:`${p.song.name}${p.song.bpm?` · ${Math.round(p.target)} BPM`:''}`,icon:'icons/icon-192.png',badge:'icons/icon-192.png',silent:true}).catch(()=>{});
+}
+document.addEventListener('visibilitychange',syncPlaybackNotice);
+
 // ---------- Modo práctica con canción ----------
 let sessionFromPlayer=false;
 const practiceSeconds=()=>player?[...player.practice.values()].reduce((a,b)=>a+b,0):0;
@@ -1503,7 +1518,7 @@ function stopPlayer(){
   // Quitar los avisos antes de pausar: el evento 'pause' llega cuando player ya es null.
   player.audio.onplay=player.audio.onpause=player.audio.ontimeupdate=null;
   player.audio.pause();if(player.url)URL.revokeObjectURL(player.url);
-  player=null;syncMini();renderHome();
+  player=null;syncMini();syncPlaybackNotice();renderHome();
 }
 function syncMini(){
   const m=$('#miniPlayer'),p=player,inPlayer=$('#toolModal').classList.contains('open')&&!!$('#playBtn');
@@ -1567,7 +1582,7 @@ navigator.storage?.persist?.().catch(()=>{});
 $('#category').innerHTML=categories.map(x=>`<option>${x}</option>`).join('');$('#warmup').innerHTML=warmups.map(x=>`<option>${x}</option>`).join('');
 $$('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));$('#addBtn').onclick=()=>openSessionModal();$('#cancelSession').onclick=closeSessionModal;$('#saveSession').onclick=saveSession;$('#addTempo').onclick=()=>{const last=$$('#tempoRows .tempo-row').pop(),bpm=+last?.querySelector('.block-bpm').value;addTempoRow(bpm?bpm+5:'','',last?.querySelector('.block-variant').value||'')};$$('[data-min]').forEach(b=>b.onclick=()=>{$('#practiceMinutes').value=b.dataset.min;syncPresetChips();updateTotal()});$('#warmup').onchange=updateTotal;$('#warmupMinutes').oninput=updateTotal;$('#practiceMinutes').oninput=()=>{syncPresetChips();updateTotal()};$('#exerciseName').oninput=syncExerciseCategory;$('#exercisePicker').onchange=chooseExercise;$('#addInlineVariant').onclick=showInlineVariantEditor;$('#saveInlineVariant').onclick=saveVariantOnTheFly;$('#cancelInlineVariant').onclick=hideInlineVariantEditor;$('#inlineVariantName').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();saveVariantOnTheFly()}});
 $('#miniOpen').onclick=()=>player&&openStems(player.song.id);
-$('#miniPlay').onclick=()=>{if(!player)return;player.audio.paused?player.audio.play().catch(()=>toast('No se pudo reproducir')):player.audio.pause()};
+$('#miniPlay').onclick=()=>{if(!player)return;askNoticePermission();player.audio.paused?player.audio.play().catch(()=>toast('No se pudo reproducir')):player.audio.pause()};
 $('#miniClose').onclick=()=>{if(!player)return;if(practiceSeconds()>=60&&!confirm(`Tienes ${practiceText()} de práctica sin guardar. ¿Cerrar la canción igualmente?`))return;stopPlayer()};
 resetForm();renderAll();requestAnimationFrame(syncNavIndicator);window.addEventListener('resize',syncNavIndicator);
 if(window.visualViewport){
